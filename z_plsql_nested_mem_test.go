@@ -38,6 +38,8 @@ func TestPlSqlNestedObj(t *testing.T) {
 	ctx, cancel := context.WithTimeout(testContext("PlSqlTypes"), 1*time.Minute)
 	defer cancel()
 
+	//godror.SetLogger(zlog.NewT(t).SLog())
+
 	createTypes := func(ctx context.Context, db *sql.DB) error {
 		qry := []string{
 			`create or replace type pair force as object (
@@ -138,6 +140,8 @@ func TestPlSqlNestedObj(t *testing.T) {
 		}
 	}
 
+	pslice := pslice(step, step/2) // 100 objects, each with 50 pairs
+
 	callObjectType := func(ctx context.Context, db *sql.DB) error {
 		cx, err := db.Conn(ctx)
 		if err != nil {
@@ -151,11 +155,10 @@ func TestPlSqlNestedObj(t *testing.T) {
 		}
 		defer tx.Commit()
 
-		s := pslice(step, step/5) // 100 objects, each with 20 pairs
 		const qry = `begin test_pkg_sample.test_pobj_in(:1); end;`
 		_, err = tx.ExecContext(ctx,
 			qry,
-			sql.Out{Dest: &s, In: true},
+			sql.Out{Dest: &pslice, In: true},
 		)
 		return err
 	}
