@@ -322,7 +322,6 @@ func (Q *Queue) DequeueWithOptions(messages []Message, opts *DeqOptions) (int, e
 				return fmt.Errorf("next: %w", err)
 			}
 			s, _ := dest[0].(string)
-			// fmt.Println("Dequeue:", s)
 			if logger != nil {
 				logger.Debug("Dequeue", "name", Q.name, "size", s, "dest", dest[0])
 			}
@@ -341,7 +340,10 @@ func (Q *Queue) DequeueWithOptions(messages []Message, opts *DeqOptions) (int, e
 			if logger != nil {
 				logger.Error("check queue size", "error", err)
 			}
-		} else if 0 < num && num < len(messages) {
+		} else if 0 <= num && num < len(messages) {
+			if num == 0 {
+				num = 1 // call deqOne if there are no messages to prevent memory leak
+			}
 			if logger != nil {
 				logger.Info("Dequeue limit number of messages", "old", len(messages), "new", num)
 			}
