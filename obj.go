@@ -1,4 +1,4 @@
-// Copyright 2017, 2022 The Godror Authors
+// Copyright 2017, 2025 The Godror Authors
 //
 //
 // SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
@@ -233,12 +233,10 @@ func (O *Object) Collection() ObjectCollection {
 
 // Close releases a reference to the object.
 func (O *Object) Close() error {
-	if O == nil {
+	if O == nil || O.dpiObject == nil {
 		return nil
 	}
-	if O.dpiObject == nil {
-		return nil
-	}
+	oldRefCount := O.dpiObject.refCount
 	logger := getLogger(context.TODO())
 	if logger != nil && logger.Enabled(context.TODO(), slog.LevelDebug) {
 		logger.Debug("Object.Close", "object", fmt.Sprintf("%p", O.dpiObject))
@@ -247,6 +245,31 @@ func (O *Object) Close() error {
 	// Close sub-objects first
 	data := scratch.Get()
 	defer scratch.Put(data)
+	if O.ObjectType.CollectionOf != nil {
+		coll := O.Collection()
+		for curr, err := coll.First(); err == nil; curr, err = coll.Next(curr) {
+			if err = coll.GetItem(data, curr); err != nil {
+				if logger != nil {
+					logger.Error("get sub-object", "idx", curr, "error", err)
+					continue
+				}
+			}
+			obj := data.GetObject()
+			if obj == nil {
+				continue
+			}
+			if logger != nil && logger.Enabled(context.TODO(), slog.LevelDebug) {
+				logger.Debug("ObjectCollection.Close close item", "idx", curr, "object", fmt.Sprintf("%p", obj))
+			}
+			if err = obj.Close(); err != nil && logger != nil && false {
+				logger.Error("close sub-object", "idx", curr, "error", err)
+			}
+		}
+		if err := coll.Trim(0); err != nil && logger != nil {
+			logger.Error("trim collection", "error", err)
+		}
+	}
+
 	for _, a := range O.Attributes {
 		if !a.IsObject() {
 			continue
@@ -264,7 +287,7 @@ func (O *Object) Close() error {
 			}
 
 			return obj.Close()
-		}(); err != nil && logger != nil {
+		}(); err != nil && logger != nil && false {
 			logger.Error("Close sub-object", "name", a.Name, "error", err)
 		}
 	}
@@ -273,8 +296,15 @@ func (O *Object) Close() error {
 
 	dpiObject := O.dpiObject
 	O.dpiObject = nil
-	if err := O.drv.checkExec(func() C.int { return C.dpiObject_release(dpiObject) }); err != nil {
+
+	if err := O.drv.checkExec(func() C.int {
+		return C.dpiObject_release(dpiObject)
+	}); err != nil {
 		return fmt.Errorf("error on close object: %w", err)
+	}
+
+	if warnDpiObjectRefCount {
+		fmt.Printf("%s[%p] refCount %d -> %d\n", O.Name, dpiObject, oldRefCount, dpiObject.refCount)
 	}
 
 	return nil
@@ -915,7 +945,9 @@ func (O ObjectCollection) Next(i int) (int, error) {
 // Len returns the length of the collection.
 func (O ObjectCollection) Len() (int, error) {
 	var size C.int32_t
-	if err := O.drv.checkExec(func() C.int { return C.dpiObject_getSize(O.dpiObject, &size) }); err != nil {
+	if err := O.drv.checkExec(func() C.int {
+		return C.dpiObject_getSize(O.dpiObject, &size)
+	}); err != nil {
 		return 0, fmt.Errorf("len: %w", err)
 	}
 	return int(size), nil
@@ -923,7 +955,9 @@ func (O ObjectCollection) Len() (int, error) {
 
 // Trim the collection to n.
 func (O ObjectCollection) Trim(n int) error {
-	return O.drv.checkExec(func() C.int { return C.dpiObject_trim(O.dpiObject, C.uint32_t(n)) })
+	return O.drv.checkExec(func() C.int {
+		return C.dpiObject_trim(O.dpiObject, C.uint32_t(n))
+	})
 }
 
 // ObjectType holds type info of an Object.
@@ -1067,7 +1101,9 @@ func (t *ObjectType) NewObject() (*Object, error) {
 	}
 	obj := (*C.dpiObject)(C.malloc(C.sizeof_void))
 	t.mu.RLock()
-	err := t.drv.checkExec(func() C.int { return C.dpiObjectType_createObject(t.dpiObjectType, &obj) })
+	err := t.drv.checkExec(func() C.int {
+		return C.dpiObjectType_createObject(t.dpiObjectType, &obj)
+	})
 	t.mu.RUnlock()
 	if err != nil {
 		C.free(unsafe.Pointer(obj))
@@ -1135,7 +1171,9 @@ func (t *ObjectType) Close() error {
 	if logger != nil && logger.Enabled(context.TODO(), slog.LevelDebug) {
 		logger.Debug("ObjectType.Close", "name", t.Name)
 	}
-	if err := drv.checkExec(func() C.int { return C.dpiObjectType_release(ot) }); err != nil {
+	if err := drv.checkExec(func() C.int {
+		return C.dpiObjectType_release(ot)
+	}); err != nil {
 		return fmt.Errorf("error releasing object type: %w", err)
 	}
 
@@ -1146,7 +1184,9 @@ func wrapObject(c *conn, objectType *C.dpiObjectType, object *C.dpiObject) (*Obj
 	if objectType == nil {
 		return nil, errors.New("objectType is nil")
 	}
-	if err := c.checkExec(func() C.int { return C.dpiObject_addRef(object) }); err != nil {
+	if err := c.checkExec(func() C.int {
+		return C.dpiObject_addRef(object)
+	}); err != nil {
 		return nil, err
 	}
 	o := &Object{
@@ -1316,7 +1356,9 @@ func (A ObjectAttribute) Close() error {
 	if logger := getLogger(context.Background()); logger != nil && logger.Enabled(context.Background(), slog.LevelDebug) {
 		logger.Debug("ObjectAttribute.Close", "name", A.Name)
 	}
-	if err := A.ObjectType.drv.checkExec(func() C.int { return C.dpiObjectAttr_release(A.dpiObjectAttr) }); err != nil {
+	if err := A.ObjectType.drv.checkExec(func() C.int {
+		return C.dpiObjectAttr_release(A.dpiObjectAttr)
+	}); err != nil {
 		return err
 	}
 	return nil

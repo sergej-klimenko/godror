@@ -21,6 +21,7 @@ import (
 func TestPlSqlNestedObj(t *testing.T) {
 	ctx, cancel := context.WithTimeout(testContext("PlSqlTypes"), 1*time.Minute)
 	defer cancel()
+	// defer tl.enableLogging(t)()
 
 	const step = 200
 	stepS := strconv.Itoa(step)
@@ -150,6 +151,10 @@ func TestPlSqlNestedObj(t *testing.T) {
 		t.Logf("%s: %d; process memory (rss): %.3f MiB\n", t.Name(), loopCnt, float64(rss)/MiB)
 		if rss > startMem[t.Name()]*2 {
 			t.Errorf("%s: started with RSS %d, got %d (%.3f%%)",
+				t.Name(),
+				startMem[t.Name()]/MiB, rss/MiB, float64(rss*100)/float64(startMem[t.Name()]))
+		} else {
+			t.Logf("%s: started with RSS %d, got %d (%.3f%%)",
 				t.Name(),
 				startMem[t.Name()]/MiB, rss/MiB, float64(rss*100)/float64(startMem[t.Name()]))
 		}
